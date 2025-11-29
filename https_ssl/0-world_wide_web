@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# This script audits DNS subdomains for a given domain
+
+lookup_subdomain() {
+    sub="$1"
+    domain="$2"
+    full="${sub}.${domain}"
+
+    # dig response
+    record_line=$(dig "$full" | awk '/ANSWER SECTION/{getline; print}')
+    record_type=$(echo "$record_line" | awk '{print $4}')
+    destination=$(echo "$record_line" | awk '{print $5}')
+
+    echo "The subdomain $sub is a $record_type record and points to $destination"
+}
+
+domain="$1"
+subdomain="$2"
+
+# Default list of subdomains
+default_list=("www" "lb-01" "web-01" "web-02")
+
+if [ -z "$subdomain" ]; then
+    for sub in "${default_list[@]}"; do
+        lookup_subdomain "$sub" "$domain"
+    done
+else
+    lookup_subdomain "$subdomain" "$domain"
+fi
