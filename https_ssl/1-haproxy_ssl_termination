@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Install HAProxy, generate SSL certificate for www.maximevijwa.tech and configure SSL termination
+
+# Domain
+DOMAIN="maximevijwa.tech"
+
+# Web server IPs
+WEB1="54.208.204.254"
+WEB2="54.167.38.96"
+
+# Update system and install HAProxy and Certbot
+sudo apt-get update -y
+sudo apt-get install -y haproxy certbot
+
+# Ensure HAProxy version is 1.5+
+haproxy -v | grep -qE 'version [1-9]\.[5-9]|version [1-9][0-9]\.' || { echo "HAProxy v1.5+ required"; exit 1; }
+
+# Generate SSL certificate for www.maximevijwa.tech
+sudo certbot certonly --standalone -d www.$DOMAIN --non-interactive --agree-tos -m admin@$DOMAIN
+
+# Combine certificate and private key into HAProxy .pem file
+sudo bash -c "cat /etc/letsencrypt/live/www.$DOMAIN/fullchain.pem /etc/letsencrypt/live/www.$DOMAIN/privkey.pem > /etc/ssl/private/haproxy.pem"
+sudo chmod 600 /etc/ssl/private/haproxy.pem
+
+# Backup existing HAProxy config
+sudo cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak
+
+# Write new HAProxy configuration for SSL termination
+sudo bash -c "cat > /etc/haproxy/haproxy.cfg <<EOL
+global
+    log /dev/log    local0
+    log /dev/log    local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
+    tune.ssl.default-dh-param 2048
+
+defaults
+    log     global
+    mode    http
+    option  httplog
+    option  dontlognull
+    timeout connect 5000
+    timeout client  50000
+    timeout server  50000
+
+frontend https_in
+    bind *:443 ssl crt /etc/ssl/private/haproxy.pem
+    mode http
+    default_backend webservers
+
+backend webservers
+    balance roundrobin
+    server web01 $WEB1:80 check
+    server web02 $WEB2:80 check
+EOL"
+
+# Restart HAProxy
+sudo systemctl restart haproxy
+sudo systemctl status haproxy --no-pager
+
+# Copy HAProxy config to project folder for GitHub
+mkdir -p ~/alu-webstack/https_ssl
+sudo cp /etc/haproxy/haproxy.cfg ~/alu-webstack/https_ssl/1-haproxy_ssl_termination
+sudo chown $USER:$USER ~/alu-webstack/https_ssl/1-haproxy_ssl_termination
+
+echo "✅ HAProxy SSL termination setup completed. Config saved to ~/alu-webstack/https_ssl/1-haproxy_ssl_termination"
+
